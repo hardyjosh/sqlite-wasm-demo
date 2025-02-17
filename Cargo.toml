@@ -1,0 +1,38 @@
+[package]
+name = "sqlite-wasm-coordinator"
+version = "0.1.0"
+edition = "2021"
+description = "A tab coordination system for SQLite WASM that manages database access across multiple browser tabs"
+license = "MIT"
+repository = "https://github.com/yourusername/sqlite-wasm-coordinator"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sqlite-wasm-rs = { version = "0.3.0", default-features = false, features = ["precompiled"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = [
+    "Worker",
+    "WorkerGlobalScope",
+    "WorkerOptions",
+    "MessageEvent",
+    "DedicatedWorkerGlobalScope",
+    "SharedWorker",
+    "SharedWorkerGlobalScope",
+    "MessagePort",
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "Window",
+    "Performance",
+    "WorkerGlobalScope"
+]}
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+futures = "0.3"
+
+[dev-dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen-test = "0.3" 
