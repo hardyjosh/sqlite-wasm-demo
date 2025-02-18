@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WASM Tab Manager</title>
+</head>
+<body>
+    <button id="test-button">Send Test Message</button>
+
+    <script type="module">
+        import init, { TabManager } from './pkg/sqlite_wasm_coordinator.js';
+        
+        async function run() {
+            console.log("Starting...");
+            await init();
+            console.log("WASM initialized");
+            const manager = new TabManager();
+            console.log("TabManager created");
+
+            // Set up button click handler
+            document.getElementById('test-button').addEventListener('click', () => {
+                manager.send_test_message();
+            });
+        }
+        
+        run().catch(console.error);
+    </script>
+</body>
+</html> 
