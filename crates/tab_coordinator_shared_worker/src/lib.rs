@@ -222,9 +222,7 @@ fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
                 )
                 .into(),
             );
-            // Clone the values we need
-            let sql = sql.clone();
-            let from_tab_id = from_tab_id.clone();
+            let requester_id = from_tab_id.clone();
             TAB_STATE.with(|state| {
                 let state = state.borrow();
                 if let Some(leader_id) = state.get_leader() {
@@ -232,8 +230,10 @@ fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
                         web_sys::console::log_1(
                             &format!("2. Forwarding query to leader {}", leader_id).into(),
                         );
-                        // Create new message with cloned values
-                        let query = TabMessage::ExecuteQuery { sql, from_tab_id };
+                        let query = TabMessage::ExecuteQuery {
+                            sql: sql.clone(),
+                            from_tab_id: requester_id,
+                        };
                         match leader_port
                             .post_message(&serde_wasm_bindgen::to_value(&query).unwrap())
                         {
@@ -256,14 +256,13 @@ fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
             web_sys::console::log_1(&"=== QUERY RESPONSE FLOW START ===".into());
             web_sys::console::log_1(
                 &format!(
-                    "1. Got query response from leader tab {}: {:?} (error: {:?})",
+                    "1. Got query response for tab {}: {:?} (error: {:?})",
                     from_tab_id, results, error
                 )
                 .into(),
             );
             TAB_STATE.with(|state| {
                 let state = state.borrow();
-                // Get the original requester's tab ID from the message
                 if let Some(requester_port) = state.ports.get(from_tab_id) {
                     web_sys::console::log_1(&"2. Found requester's port, sending response".into());
                     match requester_port.post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())

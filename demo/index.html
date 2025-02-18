@@ -3,12 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <title>SQLite Demo</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        .status-bar {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .leader-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .is-leader {
+            background: #4CAF50;
+            color: white;
+        }
+        .not-leader {
+            background: #9E9E9E;
+            color: white;
+        }
+        .query-section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        .query-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background: #2196F3;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button:disabled {
+            background: #9E9E9E;
+            cursor: not-allowed;
+        }
+        .custom-query {
+            display: flex;
+            gap: 0.5rem;
+        }
+        input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #results {
+            white-space: pre-wrap;
+            padding: 1rem;
+            background: #f8f8f8;
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
+    <div class="status-bar">
+        <div>Tab ID: <span id="tab-id"></span></div>
+        <div>Status: <span id="leader-status" class="leader-badge not-leader">Not Leader</span></div>
+    </div>
+
+    <div id="leader-section" class="query-section" style="display: none">
+        <h2>Leader Write Operations</h2>
+        <div class="query-buttons">
+            <button onclick="window.executeWrite('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)')">Create Users Table</button>
+            <button onclick="window.executeWrite('INSERT INTO users (name) VALUES (\'Alice\'), (\'Bob\')')">Insert Sample Data</button>
+            <button onclick="window.executeWrite('DELETE FROM users')">Clear Users Table</button>
+        </div>
+        <div class="custom-query">
+            <input type="text" id="write-query" placeholder="Enter a write query (INSERT, UPDATE, DELETE, etc.)">
+            <button onclick="window.executeCustomWrite()">Execute Write</button>
+        </div>
+    </div>
+
+    <div class="query-section">
+        <h2>Read Operations (All Tabs)</h2>
+        <div class="query-buttons">
+            <button onclick="window.executeRead('SELECT * FROM users')">List All Users</button>
+            <button onclick="window.executeRead('SELECT COUNT(*) as count FROM users')">Count Users</button>
+            <button onclick="window.executeRead('SELECT name FROM users ORDER BY name')">List User Names</button>
+        </div>
+        <div class="custom-query">
+            <input type="text" id="read-query" placeholder="Enter a read query (SELECT)">
+            <button id="execute-read" onclick="window.executeCustomRead()">Execute Read</button>
+        </div>
+    </div>
+
+    <h2>Results:</h2>
     <div id="results"></div>
-    <div>Tab ID: <span id="tab-id"></span></div>
-    <button id="check-leader">Check Leader Status</button>
-    <button id="execute-query">Execute Query (Leader Only)</button>
 
     <script type="module">
         import init, { BrowserSQLite } from './pkg/browser_sqlite.js';
@@ -20,63 +122,62 @@
             // Display tab ID
             document.getElementById('tab-id').textContent = db.get_tab_id();
             
-            // Add leader check button handler
-            document.getElementById('check-leader').onclick = async () => {
-                const isLeader = await db.check_leader();
-                alert(`This tab ${isLeader ? 'is' : 'is not'} the leader`);
+            // Setup global functions
+            window.executeWrite = async (sql) => {
+                try {
+                    await db.execute(sql);
+                    console.log("Write executed successfully");
+                    document.getElementById('results').textContent = "Write operation successful";
+                } catch (e) {
+                    console.error("Write failed:", e);
+                    document.getElementById('results').textContent = `Error: ${e}`;
+                }
             };
 
-            // Add direct query button handler
-            document.getElementById('execute-query').onclick = async () => {
+            window.executeRead = async (sql) => {
                 try {
-                    const results = await db.query("SELECT * FROM users");
-                    console.log("Query executed successfully");
-                    console.log(results);
+                    // Disable the button
+                    const button = document.getElementById('execute-read');
+                    button.disabled = true;
+                    
+                    const results = await db.query(sql);
+                    console.log("Query results:", results);
+                    document.getElementById('results').textContent = JSON.stringify(results, null, 2);
                 } catch (e) {
                     console.error("Query failed:", e);
+                    document.getElementById('results').textContent = `Error: ${e}`;
+                } finally {
+                    // Re-enable the button
+                    const button = document.getElementById('execute-read');
+                    button.disabled = false;
                 }
             };
 
-            console.log("Created BrowserSQLite instance:", db);
+            window.executeCustomWrite = async () => {
+                const sql = document.getElementById('write-query').value;
+                if (sql) await window.executeWrite(sql);
+            };
 
-            // wait for 1 second
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            try {
-                console.log("Creating table...");
-                try {
-                    await db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)");
-                } catch (e) {
-                    console.error("Error creating table:", e);
-                }
-                
-                try {
-                    console.log("Inserting data...");
-                    await db.execute("INSERT INTO users (name) VALUES ('Alice'), ('Bob')");
-                } catch (e) {
-                    console.error("Error inserting data:", e);
-                }
-                try {
-                    console.log("Querying data...");
-                    const results = await db.query("SELECT * FROM users");
-                    
-                    console.log("Results:", results);
-                    document.getElementById('results').textContent = 
-                        JSON.stringify(results, null, 2);
+            window.executeCustomRead = async () => {
+                const sql = document.getElementById('read-query').value;
+                if (sql) await window.executeRead(sql);
+            };
 
-                } catch (e) {
-                    console.error("Error querying data:", e);
-                }
-            } catch (e) {
-                console.error("Database error:", e);
-                document.getElementById('results').textContent = 
-                    "Error: " + e.message;
+            // Poll leader status
+            async function updateLeaderStatus() {
+                const isLeader = await db.check_leader();
+                const badge = document.getElementById('leader-status');
+                badge.textContent = isLeader ? 'Leader' : 'Not Leader';
+                badge.className = `leader-badge ${isLeader ? 'is-leader' : 'not-leader'}`;
+                document.getElementById('leader-section').style.display = isLeader ? 'block' : 'none';
             }
+
+            // Update status immediately and then every 2 seconds
+            await updateLeaderStatus();
+            setInterval(updateLeaderStatus, 4000);
         }
         
         run().catch(console.error);
     </script>
-
-    hi
 </body>
 </html> 

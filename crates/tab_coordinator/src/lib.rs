@@ -57,7 +57,11 @@ impl TabManager {
     pub fn new(worker: web_sys::Worker) -> Result<TabManager, JsValue> {
         let tab_id = Uuid::new_v4().to_string();
         let leader_data = Rc::new(RefCell::new(String::new()));
+        let response_sender = Rc::new(RefCell::new(None::<oneshot::Sender<String>>));
         let leader_callback = Rc::new(RefCell::new(None::<js_sys::Function>));
+        let query_response_sender = Rc::new(RefCell::new(
+            None::<oneshot::Sender<Result<Vec<Vec<String>>, String>>>,
+        ));
 
         // Create the shared worker
         let shared_worker = SharedWorker::new("/pkg/worker/tab_coordinator_shared_worker.js")?;
@@ -71,10 +75,10 @@ impl TabManager {
         let port_clone = port.clone();
         let leader_data_clone = leader_data.clone();
         let tab_id_clone = tab_id.clone();
-        let response_sender: Rc<RefCell<Option<oneshot::Sender<String>>>> =
-            Rc::new(RefCell::new(None));
         let response_sender_clone = response_sender.clone();
         let leader_callback_clone = leader_callback.clone();
+        let query_response_sender_clone = query_response_sender.clone();
+        let query_response_sender_closure = query_response_sender_clone.clone();
 
         let port_message_handler = {
             // Create a struct to hold our shared state
@@ -89,17 +93,16 @@ impl TabManager {
             }
 
             let state = Rc::new(RefCell::new(SharedState {
-                response_sender: response_sender.clone(),
-                leader_data: leader_data.clone(),
-                port: port.clone(),
-                tab_id: tab_id.clone(),
+                response_sender: response_sender_clone,
+                leader_data: leader_data_clone,
+                port: port_clone,
+                tab_id: tab_id_clone,
                 worker: worker.clone(),
-                query_response_sender: Rc::new(RefCell::new(None)),
+                query_response_sender: query_response_sender_clone,
             }));
 
             Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
                 if let Ok(msg) = serde_wasm_bindgen::from_value::<TabMessage>(e.data()) {
-                    web_sys::console::log_1(&JsValue::from_str(&format!("Tab received message")));
                     web_sys::console::log_1(&JsValue::from_str(&format!("Tab message: {:?}", msg)));
 
                     match msg {
@@ -133,28 +136,35 @@ impl TabManager {
                                 .unwrap();
                         }
                         TabMessage::ExecuteQuery { sql, from_tab_id } => {
-                            let state = state.borrow();
                             console::log_1(&JsValue::from_str("ExecuteQuery received by tab"));
-                            let port = state.port.clone();
-                            let tab_id = state.tab_id.clone();
-                            let worker = state.worker.clone();
-                            let original_requester = from_tab_id.clone();
-                            let response_sender = state.response_sender.clone();
 
-                            drop(state); // Explicitly drop the borrow before the async block
+                            // Clone everything we need from state
+                            let (port, tab_id, worker, response_sender, query_response_sender) = {
+                                let state = state.borrow();
+                                (
+                                    state.port.clone(),
+                                    state.tab_id.clone(),
+                                    state.worker.clone(),
+                                    state.response_sender.clone(),
+                                    state.query_response_sender.clone(),
+                                )
+                            };
+                            let original_requester = from_tab_id.clone();
 
                             wasm_bindgen_futures::spawn_local(async move {
-                                // Check if we're the leader
+                                // Create a separate channel for leader check
+                                let (leader_sender, leader_receiver) = oneshot::channel::<String>();
                                 let msg = TabMessage::CheckLeader {
                                     tab_id: tab_id.clone(),
                                 };
-                                let (sender, receiver) = oneshot::channel();
-                                *response_sender.borrow_mut() = Some(sender);
+
+                                // Store the sender in response_sender
+                                *response_sender.borrow_mut() = Some(leader_sender);
 
                                 port.post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
                                     .unwrap();
 
-                                let is_leader = receiver
+                                let is_leader = leader_receiver
                                     .await
                                     .map_err(|_| "Channel closed".to_string())
                                     .unwrap()
@@ -170,6 +180,18 @@ impl TabManager {
                                         &serde_wasm_bindgen::to_value(&response).unwrap(),
                                     )
                                     .unwrap();
+
+                                    // Only send through query_response_sender if we're the original requester
+                                    if tab_id == original_requester {
+                                        if let Some(sender) =
+                                            query_response_sender.borrow_mut().take()
+                                        {
+                                            let _ =
+                                                sender
+                                                    .send(Err("Only leader can execute queries"
+                                                        .to_string()));
+                                        }
+                                    }
                                     return;
                                 }
 
@@ -208,45 +230,86 @@ impl TabManager {
                                             parsed_results.push(parsed_row);
                                         }
 
-                                        // Send query results back through the coordination system
+                                        // Send results through both channels
+                                        // 1. Back to the original requester through the shared worker
                                         let response = TabMessage::QueryResponse {
-                                            results: parsed_results,
-                                            from_tab_id: original_requester,
+                                            results: parsed_results.clone(),
+                                            from_tab_id: original_requester.clone(),
                                             error: None,
                                         };
                                         port.post_message(
                                             &serde_wasm_bindgen::to_value(&response).unwrap(),
                                         )
                                         .unwrap();
+
+                                        // 2. If we're the leader AND the original requester, send through our query_response_sender
+                                        if tab_id == original_requester {
+                                            if let Some(sender) =
+                                                query_response_sender.borrow_mut().take()
+                                            {
+                                                let _ = sender.send(Ok(parsed_results));
+                                            }
+                                        }
+
+                                        console::log_1(&JsValue::from_str(&format!(
+                                            "Sent query response to tab: {}",
+                                            original_requester
+                                        )));
                                     }
                                     Err(e) => {
+                                        let error_msg = format!("Query error: {:?}", e);
+
+                                        // Send error through both channels
+                                        // 1. Back to the original requester through the shared worker
                                         let response = TabMessage::QueryResponse {
                                             results: vec![],
-                                            from_tab_id: original_requester,
-                                            error: Some(format!("Query error: {:?}", e)),
+                                            from_tab_id: original_requester.clone(),
+                                            error: Some(error_msg.clone()),
                                         };
                                         port.post_message(
                                             &serde_wasm_bindgen::to_value(&response).unwrap(),
                                         )
                                         .unwrap();
+
+                                        // 2. If we're the leader AND the original requester, send through our query_response_sender
+                                        if tab_id == original_requester {
+                                            if let Some(sender) =
+                                                query_response_sender.borrow_mut().take()
+                                            {
+                                                let _ = sender.send(Err(error_msg));
+                                            }
+                                        }
                                     }
                                 }
                             });
                         }
-                        TabMessage::QueryResponse { results, error, .. } => {
-                            console::log_1(&JsValue::from_str("Received query response"));
-                            let sender = {
+                        TabMessage::QueryResponse {
+                            results,
+                            error,
+                            from_tab_id,
+                        } => {
+                            console::log_1(&JsValue::from_str(&format!(
+                                "Received query response for tab: {}",
+                                from_tab_id
+                            )));
+
+                            // First get the current tab ID
+                            let current_tab_id = {
                                 let state = state.borrow();
-                                let sender = state.query_response_sender.borrow_mut().take();
-                                drop(state);
-                                sender
+                                state.tab_id.clone()
                             };
-                            if let Some(sender) = sender {
-                                let result = match error {
-                                    Some(err) => Err(err),
-                                    None => Ok(results),
-                                };
-                                let _ = sender.send(result);
+
+                            // Only process if we're the original requester
+                            if current_tab_id == from_tab_id {
+                                let sender = query_response_sender_closure.borrow_mut().take();
+
+                                if let Some(s) = sender {
+                                    let result = match error {
+                                        Some(err) => Err(err),
+                                        None => Ok(results),
+                                    };
+                                    let _ = s.send(result);
+                                }
                             }
                         }
                         _ => {}
@@ -289,15 +352,13 @@ impl TabManager {
             leader_data,
             response_sender,
             leader_callback,
-            query_response_sender: Rc::new(RefCell::new(None)),
+            query_response_sender,
             worker,
         })
     }
 
     #[wasm_bindgen]
     pub async fn check_leader(&self) -> Result<bool, JsValue> {
-        web_sys::console::log_1(&JsValue::from_str("TabManager: checking leader..."));
-
         // Create a new channel specifically for this check_leader call
         let (sender, receiver) = oneshot::channel();
         *self.response_sender.borrow_mut() = Some(sender);
@@ -368,9 +429,16 @@ impl TabManager {
     }
 
     pub async fn route_query(&self, sql: &str) -> Result<JsValue, JsValue> {
+        // Create a new channel for this query
         let (sender, receiver) = oneshot::channel();
-        *self.query_response_sender.borrow_mut() = Some(sender);
 
+        // Store the sender in query_response_sender
+        {
+            let mut query_sender = self.query_response_sender.borrow_mut();
+            *query_sender = Some(sender);
+        } // ensure the borrow is dropped
+
+        // Send the query request
         let msg = TabMessage::ExecuteQuery {
             sql: sql.to_string(),
             from_tab_id: self.tab_id.clone(),
@@ -378,10 +446,15 @@ impl TabManager {
         self.port
             .post_message(&serde_wasm_bindgen::to_value(&msg)?)?;
 
+        // Wait for response
         let response = receiver
             .await
-            .map_err(|_| JsValue::from_str("Channel closed"))??;
+            .map_err(|_| JsValue::from_str("Channel closed"))?;
 
-        Ok(serde_wasm_bindgen::to_value(&response)?)
+        // Convert the response to JsValue
+        match response {
+            Ok(results) => Ok(serde_wasm_bindgen::to_value(&results)?),
+            Err(err) => Err(JsValue::from_str(&err)),
+        }
     }
 }
