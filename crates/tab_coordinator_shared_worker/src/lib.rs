@@ -2,19 +2,40 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use web_sys::MessageEvent;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum TabMessage {
-    Register { tab_id: String },
-    CheckLeader { tab_id: String },
-    LeaderResponse { is_leader: bool },
-    QueryLeader { from_tab_id: String },
-    LeaderDataResponse { data: String, from_tab_id: String },
-    Disconnect { tab_id: String },
+    Register {
+        tab_id: String,
+    },
+    CheckLeader {
+        tab_id: String,
+    },
+    LeaderResponse {
+        is_leader: bool,
+    },
+    QueryLeader {
+        from_tab_id: String,
+    },
+    LeaderDataResponse {
+        data: String,
+        from_tab_id: String,
+    },
+    Disconnect {
+        tab_id: String,
+    },
+    ExecuteQuery {
+        sql: String,
+        from_tab_id: String,
+    },
+    QueryResponse {
+        results: Vec<Vec<String>>,
+        from_tab_id: String,
+        error: Option<String>,
+    },
 }
 
 struct TabState {
@@ -79,18 +100,31 @@ pub fn handle_connect(e: MessageEvent) {
 }
 
 fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
-    web_sys::console::log_1(&format!("Worker received message: {:?}", msg).into());
+    web_sys::console::log_1(&"========================================".into());
+    web_sys::console::log_1(&format!("📨 Received message in shared worker: {:?}", msg).into());
+    web_sys::console::log_1(&"========================================".into());
+
     match msg {
         TabMessage::Register { tab_id } => {
-            web_sys::console::log_1(&format!("Handling register for tab: {}", tab_id).into());
+            web_sys::console::log_1(&format!("📝 Registering tab: {}", tab_id).into());
             TAB_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 state.register_tab(tab_id.clone(), port.clone());
+                let is_leader = state.tabs.len() == 1;
                 web_sys::console::log_1(
-                    &format!("After register, ports: {:?}", state.ports.keys()).into(),
+                    &format!("👑 Tab {} is_leader: {}", tab_id, is_leader).into(),
                 );
-
-                let is_leader = state.get_leader().map(|id| id == &tab_id).unwrap_or(false);
+                web_sys::console::log_1(&format!("📊 Current tabs: {:?}", state.tabs).into());
+            });
+        }
+        TabMessage::CheckLeader { tab_id } => {
+            // Get current leader status from TAB_STATE
+            TAB_STATE.with(|state| {
+                let state = state.borrow();
+                let is_leader = state
+                    .get_leader()
+                    .map(|leader_id| leader_id == &tab_id)
+                    .unwrap_or(false);
 
                 web_sys::console::log_1(&format!("Tab {} is_leader: {}", tab_id, is_leader).into());
 
@@ -99,73 +133,151 @@ fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
                     .unwrap();
             });
         }
-        TabMessage::CheckLeader { tab_id } => {
-            TAB_STATE.with(|state| {
-                let is_leader = state
-                    .borrow()
-                    .get_leader()
-                    .map(|id| id == &tab_id)
-                    .unwrap_or(false);
-                let response = TabMessage::LeaderResponse { is_leader };
-                port.post_message(&serde_wasm_bindgen::to_value(&response).unwrap())
-                    .unwrap();
-            });
-        }
-        TabMessage::QueryLeader { ref from_tab_id } => {
-            web_sys::console::log_1(&format!("Querying leader from tab: {}", from_tab_id).into());
+        TabMessage::QueryLeader { from_tab_id } => {
+            web_sys::console::log_1(&"=== QUERY LEADER FLOW START ===".into());
+            web_sys::console::log_1(&format!("1. Received query from tab: {}", from_tab_id).into());
             TAB_STATE.with(|state| {
                 let state = state.borrow();
-                web_sys::console::log_1(&format!("Current ports: {:?}", state.ports.keys()).into());
+                web_sys::console::log_1(
+                    &format!("2. Current tabs in state: {:?}", state.tabs).into(),
+                );
                 if let Some(leader_id) = state.get_leader() {
-                    web_sys::console::log_1(&format!("Found leader: {}", leader_id).into());
-                    web_sys::console::log_1(
-                        &format!(
-                            "Port exists for leader: {}",
-                            state.ports.contains_key(leader_id)
-                        )
-                        .into(),
-                    );
+                    web_sys::console::log_1(&format!("3. Found leader tab: {}", leader_id).into());
                     if let Some(leader_port) = state.ports.get(leader_id) {
-                        web_sys::console::log_1(&"Got leader port, forwarding query".into());
-                        let msg_value = serde_wasm_bindgen::to_value(&msg).unwrap();
                         web_sys::console::log_1(
-                            &format!("Message to forward: {:?}", msg_value).into(),
+                            &format!(
+                                "4. Forwarding query to leader {} from tab {}",
+                                leader_id, from_tab_id
+                            )
+                            .into(),
                         );
-                        match leader_port.post_message(&msg_value) {
-                            Ok(_) => {
-                                web_sys::console::log_1(&"Successfully forwarded message".into())
-                            }
+                        let query = TabMessage::QueryLeader {
+                            from_tab_id: from_tab_id.clone(),
+                        };
+                        match leader_port
+                            .post_message(&serde_wasm_bindgen::to_value(&query).unwrap())
+                        {
+                            Ok(_) => web_sys::console::log_1(
+                                &"5. ✅ Successfully forwarded query to leader".into(),
+                            ),
                             Err(e) => web_sys::console::log_1(
-                                &format!("Error forwarding message: {:?}", e).into(),
+                                &format!("5. ❌ Failed to forward query: {:?}", e).into(),
                             ),
                         }
                     } else {
-                        web_sys::console::log_1(&"Leader port not found!".into());
+                        web_sys::console::log_1(
+                            &format!("❌ ERROR: Found leader {} but no port for it!", leader_id)
+                                .into(),
+                        );
                     }
                 } else {
-                    web_sys::console::log_1(&"No leader found!".into());
+                    web_sys::console::log_1(&"❌ ERROR: No leader found in tab state!".into());
                 }
             });
+            web_sys::console::log_1(&"=== QUERY LEADER FLOW END ===".into());
         }
-        TabMessage::LeaderDataResponse {
-            data: _,
-            ref from_tab_id,
-        } => {
+        TabMessage::LeaderDataResponse { data, from_tab_id } => {
+            web_sys::console::log_1(&"=== LEADER RESPONSE FLOW START ===".into());
             web_sys::console::log_1(
-                &format!("Leader data response from tab: {}", from_tab_id).into(),
+                &format!("1. Got response from leader {}: {:?}", from_tab_id, data).into(),
             );
+            let data = data.clone();
+            let from_tab_id = from_tab_id.clone();
             TAB_STATE.with(|state| {
-                if let Some(requester_port) = state.borrow().ports.get(from_tab_id) {
-                    requester_port
-                        .post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
-                        .unwrap();
+                web_sys::console::log_1(
+                    &format!("2. Looking for port for tab: {}", from_tab_id).into(),
+                );
+                if let Some(requester_port) = state.borrow().ports.get(&from_tab_id) {
+                    web_sys::console::log_1(&"3. Found requester's port, sending response".into());
+                    let response = TabMessage::LeaderDataResponse { data, from_tab_id };
+                    match requester_port
+                        .post_message(&serde_wasm_bindgen::to_value(&response).unwrap())
+                    {
+                        Ok(_) => web_sys::console::log_1(
+                            &"4. ✅ Successfully sent response to requester".into(),
+                        ),
+                        Err(e) => web_sys::console::log_1(
+                            &format!("4. ❌ Failed to send response: {:?}", e).into(),
+                        ),
+                    }
+                } else {
+                    web_sys::console::log_1(
+                        &format!("❌ ERROR: No port found for tab {}", from_tab_id).into(),
+                    );
                 }
             });
+            web_sys::console::log_1(&"=== LEADER RESPONSE FLOW END ===".into());
         }
         TabMessage::Disconnect { tab_id } => {
             TAB_STATE.with(|state| {
                 state.borrow_mut().remove_tab(&tab_id);
             });
+        }
+        TabMessage::ExecuteQuery { sql, from_tab_id } => {
+            web_sys::console::log_1(&"=== EXECUTE QUERY FLOW START ===".into());
+            web_sys::console::log_1(
+                &format!(
+                    "1. Received query request: {} from tab: {}",
+                    sql, from_tab_id
+                )
+                .into(),
+            );
+            // Clone the values we need
+            let sql = sql.clone();
+            let from_tab_id = from_tab_id.clone();
+            TAB_STATE.with(|state| {
+                let state = state.borrow();
+                if let Some(leader_id) = state.get_leader() {
+                    if let Some(leader_port) = state.ports.get(leader_id) {
+                        web_sys::console::log_1(
+                            &format!("2. Forwarding query to leader {}", leader_id).into(),
+                        );
+                        // Create new message with cloned values
+                        let query = TabMessage::ExecuteQuery { sql, from_tab_id };
+                        match leader_port
+                            .post_message(&serde_wasm_bindgen::to_value(&query).unwrap())
+                        {
+                            Ok(_) => web_sys::console::log_1(
+                                &"3. ✅ Successfully forwarded query to leader".into(),
+                            ),
+                            Err(e) => web_sys::console::log_1(
+                                &format!("3. ❌ Failed to forward query: {:?}", e).into(),
+                            ),
+                        }
+                    }
+                }
+            });
+        }
+        TabMessage::QueryResponse {
+            ref results,
+            ref from_tab_id,
+            ref error,
+        } => {
+            web_sys::console::log_1(&"=== QUERY RESPONSE FLOW START ===".into());
+            web_sys::console::log_1(
+                &format!(
+                    "1. Got query response from leader tab {}: {:?} (error: {:?})",
+                    from_tab_id, results, error
+                )
+                .into(),
+            );
+            TAB_STATE.with(|state| {
+                let state = state.borrow();
+                // Get the original requester's tab ID from the message
+                if let Some(requester_port) = state.ports.get(from_tab_id) {
+                    web_sys::console::log_1(&"2. Found requester's port, sending response".into());
+                    match requester_port.post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
+                    {
+                        Ok(_) => web_sys::console::log_1(
+                            &"3. ✅ Successfully sent query response to requester".into(),
+                        ),
+                        Err(e) => web_sys::console::log_1(
+                            &format!("3. ❌ Failed to send query response: {:?}", e).into(),
+                        ),
+                    }
+                }
+            });
+            web_sys::console::log_1(&"=== QUERY RESPONSE FLOW END ===".into());
         }
         _ => {}
     }

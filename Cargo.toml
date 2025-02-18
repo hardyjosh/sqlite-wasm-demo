@@ -1,8 +1,11 @@
 [workspace]
 members = [
     "crates/tab_coordinator",
-    "crates/tab_coordinator_shared_worker"
+    "crates/tab_coordinator_shared_worker",
+    "crates/sqlite_wrapper",
+    "crates/browser_sqlite"
 ]
+resolver = "2"
 
 # Shared workspace dependencies
 [workspace.dependencies]

@@ -1,0 +1,27 @@
+[package]
+name = "sqlite_wrapper"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = "0.4"
+sqlite-wasm-rs = { version = "0.3.0", default-features = false, features = ["precompiled"] }
+web-sys = { workspace = true, features = [
+    "Window",
+    "Performance",
+    "WorkerGlobalScope",
+    "MessageEvent",
+    "DedicatedWorkerGlobalScope",
+    "console",
+    "Navigator",
+    "StorageManager",
+    "Storage",
+    "FileSystem",
+    "FileSystemDirectoryHandle",
+    "FileSystemHandle"
+]}
+js-sys = { workspace = true } 

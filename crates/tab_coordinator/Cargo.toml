@@ -4,24 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = { workspace = true }
-serde = { workspace = true }
-serde-wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = [
-    "Window",
-    "Document",
-    "Element",
-    "HtmlElement",
     "MessagePort",
     "SharedWorker",
-    "Event",
     "MessageEvent",
     "console"
 ]}
 js-sys = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
 uuid = { workspace = true }
-wasm-bindgen-futures = "0.4"
-futures = "0.3" 
+futures = "0.3"
+wasm-bindgen-futures = "0.4" 

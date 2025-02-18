@@ -2,74 +2,81 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WASM Tab Manager</title>
-    <style>
-        #leader-controls {
-            display: none;
-            margin: 10px 0;
-        }
-        #leader-input {
-            margin: 10px 0;
-            width: 300px;
-            padding: 5px;
-        }
-    </style>
+    <title>SQLite Demo</title>
 </head>
 <body>
+    <div id="results"></div>
     <div>Tab ID: <span id="tab-id"></span></div>
-    <div id="leader-status">Leadership status unknown</div>
     <button id="check-leader">Check Leader Status</button>
-    
-    <!-- For the leader -->
-    <div id="leader-controls">
-        <h3>Leader Controls</h3>
-        <input type="text" id="leader-input" placeholder="Enter data for other tabs to query">
-        <button id="save-data">Save Data</button>
-    </div>
-
-    <!-- For any tab -->
-    <button id="query-leader">Query Leader's Data</button>
-    <div id="leader-data"></div>
+    <button id="execute-query">Execute Query (Leader Only)</button>
 
     <script type="module">
-        import init, { TabManager } from './pkg/tab_coordinator.js';
-        
+        import init, { BrowserSQLite } from './pkg/browser_sqlite.js';
+
         async function run() {
             await init();
-            const manager = new TabManager();
-
+            const db = new BrowserSQLite();
+            
             // Display tab ID
-            document.getElementById('tab-id').textContent = manager.get_tab_id();
+            document.getElementById('tab-id').textContent = db.get_tab_id();
+            
+            // Add leader check button handler
+            document.getElementById('check-leader').onclick = async () => {
+                const isLeader = await db.check_leader();
+                alert(`This tab ${isLeader ? 'is' : 'is not'} the leader`);
+            };
 
-            // Set up button handlers
-            document.getElementById('check-leader').addEventListener('click', () => {
-                manager.check_leader((is_leader) => {
-                    document.getElementById('leader-status').textContent = 
-                        is_leader ? "You are the leader" : "You are not the leader";
-                    document.getElementById('leader-controls').style.display = 
-                        is_leader ? "block" : "none";
-                });
-            });
+            // Add direct query button handler
+            document.getElementById('execute-query').onclick = async () => {
+                try {
+                    const results = await db.query("SELECT * FROM users");
+                    console.log("Query executed successfully");
+                    console.log(results);
+                } catch (e) {
+                    console.error("Query failed:", e);
+                }
+            };
 
-            document.getElementById('query-leader').addEventListener('click', async () => {
-                console.log("Querying leader");
-                const data = await manager.query_leader();
-                console.log(data);
-                document.getElementById('leader-data').textContent = `Leader data: ${data}`;
-            });
+            console.log("Created BrowserSQLite instance:", db);
 
-            // Set up leader input handler
-            document.getElementById('leader-input').addEventListener('input', (e) => {
-                window.leaderData = e.target.value;
-            });
+            // wait for 1 second
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            try {
+                console.log("Creating table...");
+                try {
+                    await db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)");
+                } catch (e) {
+                    console.error("Error creating table:", e);
+                }
+                
+                try {
+                    console.log("Inserting data...");
+                    await db.execute("INSERT INTO users (name) VALUES ('Alice'), ('Bob')");
+                } catch (e) {
+                    console.error("Error inserting data:", e);
+                }
+                try {
+                    console.log("Querying data...");
+                    const results = await db.query("SELECT * FROM users");
+                    
+                    console.log("Results:", results);
+                    document.getElementById('results').textContent = 
+                        JSON.stringify(results, null, 2);
 
-            document.getElementById('save-data').addEventListener('click', () => {
-                const data = document.getElementById('leader-input').value;
-                manager.save_data(data);
-            });
+                } catch (e) {
+                    console.error("Error querying data:", e);
+                }
+            } catch (e) {
+                console.error("Database error:", e);
+                document.getElementById('results').textContent = 
+                    "Error: " + e.message;
+            }
         }
         
         run().catch(console.error);
     </script>
+
+    hi
 </body>
 </html> 
