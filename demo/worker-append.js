@@ -14,7 +14,7 @@ self.onconnect = (e) => {
 };
 
 // Initialize WASM
-wasm_bindgen("./worker_bg.wasm")
+wasm_bindgen("./tab_coordinator_shared_worker_bg.wasm")
     .then(() => {
         console.log("Worker WASM loaded");
         wasm_bindgen.main();

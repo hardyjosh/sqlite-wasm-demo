@@ -35,7 +35,7 @@ impl TabManager {
         let leader_data = Rc::new(RefCell::new(String::new()));
         let leader_callback = Rc::new(RefCell::new(None::<js_sys::Function>));
 
-        let worker = match SharedWorker::new("/pkg/worker/worker.js") {
+        let worker = match SharedWorker::new("/pkg/worker/tab_coordinator_shared_worker.js") {
             Ok(w) => w,
             Err(e) => return Err(e),
         };

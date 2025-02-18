@@ -1,27 +1,14 @@
-[package]
-name = "sqlite-wasm-coordinator"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+    "crates/tab_coordinator",
+    "crates/tab_coordinator_shared_worker"
+]
 
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
+# Shared workspace dependencies
+[workspace.dependencies]
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-futures = "0.3"
-web-sys = { version = "0.3", features = [
-    "Window",
-    "Document",
-    "Element",
-    "HtmlElement",
-    "MessagePort",
-    "SharedWorker",
-    "Event",
-    "MessageEvent",
-    "console"
-]}
-js-sys = "0.3"
-uuid = { version = "1.0", features = ["v4", "js"] }
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
+web-sys = "0.3"
+js-sys = "0.3"
+uuid = { version = "1.0", features = ["v4", "js"] }
