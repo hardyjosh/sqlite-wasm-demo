@@ -3,9 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <title>WASM Tab Manager</title>
+    <style>
+        #leader-controls {
+            display: none;
+            margin: 10px 0;
+        }
+        #leader-input {
+            margin: 10px 0;
+            width: 300px;
+            padding: 5px;
+        }
+    </style>
 </head>
 <body>
-    <button id="test-button">Send Test Message</button>
+    <div>Tab ID: <span id="tab-id"></span></div>
+    <div id="leader-status">Leadership status unknown</div>
+    <button id="check-leader">Check Leader Status</button>
+    
+    <!-- For the leader -->
+    <div id="leader-controls">
+        <h3>Leader Controls</h3>
+        <input type="text" id="leader-input" placeholder="Enter data for other tabs to query">
+    </div>
+
+    <!-- For any tab -->
+    <button id="query-leader">Query Leader's Data</button>
+    <div id="leader-data"></div>
 
     <script type="module">
         import init, { TabManager } from './pkg/sqlite_wasm_coordinator.js';
@@ -17,9 +40,23 @@
             const manager = new TabManager();
             console.log("TabManager created");
 
-            // Set up button click handler
-            document.getElementById('test-button').addEventListener('click', () => {
-                manager.send_test_message();
+            // Display tab ID
+            document.getElementById('tab-id').textContent = manager.get_tab_id();
+
+            // Set up button handlers
+            document.getElementById('check-leader').addEventListener('click', () => {
+                manager.check_leader();
+            });
+
+            document.getElementById('query-leader').addEventListener('click', () => {
+                manager.query_leader();
+                document.getElementById('leader-data').textContent = "Querying leader...";
+            });
+
+            // Set up leader input handler
+            document.getElementById('leader-input').addEventListener('input', (e) => {
+                // Store the value for when other tabs query
+                window.leaderData = e.target.value;
             });
         }
         
