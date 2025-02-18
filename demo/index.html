@@ -174,7 +174,7 @@
 
             // Update status immediately and then every 2 seconds
             await updateLeaderStatus();
-            setInterval(updateLeaderStatus, 4000);
+            setInterval(updateLeaderStatus, 300);
         }
         
         run().catch(console.error);
