@@ -24,6 +24,7 @@
     <div id="leader-controls">
         <h3>Leader Controls</h3>
         <input type="text" id="leader-input" placeholder="Enter data for other tabs to query">
+        <button id="save-data">Save Data</button>
     </div>
 
     <!-- For any tab -->
@@ -34,29 +35,37 @@
         import init, { TabManager } from './pkg/sqlite_wasm_coordinator.js';
         
         async function run() {
-            console.log("Starting...");
             await init();
-            console.log("WASM initialized");
             const manager = new TabManager();
-            console.log("TabManager created");
 
             // Display tab ID
             document.getElementById('tab-id').textContent = manager.get_tab_id();
 
             // Set up button handlers
             document.getElementById('check-leader').addEventListener('click', () => {
-                manager.check_leader();
+                manager.check_leader((is_leader) => {
+                    document.getElementById('leader-status').textContent = 
+                        is_leader ? "You are the leader" : "You are not the leader";
+                    document.getElementById('leader-controls').style.display = 
+                        is_leader ? "block" : "none";
+                });
             });
 
-            document.getElementById('query-leader').addEventListener('click', () => {
-                manager.query_leader();
-                document.getElementById('leader-data').textContent = "Querying leader...";
+            document.getElementById('query-leader').addEventListener('click', async () => {
+                console.log("Querying leader");
+                const data = await manager.query_leader();
+                console.log(data);
+                document.getElementById('leader-data').textContent = `Leader data: ${data}`;
             });
 
             // Set up leader input handler
             document.getElementById('leader-input').addEventListener('input', (e) => {
-                // Store the value for when other tabs query
                 window.leaderData = e.target.value;
+            });
+
+            document.getElementById('save-data').addEventListener('click', () => {
+                const data = document.getElementById('leader-input').value;
+                manager.save_data(data);
             });
         }
         

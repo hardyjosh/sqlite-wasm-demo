@@ -13,7 +13,7 @@ pub enum TabMessage {
     CheckLeader { tab_id: String },
     LeaderResponse { is_leader: bool },
     QueryLeader { from_tab_id: String },
-    LeaderDataResponse { data: String },
+    LeaderDataResponse { data: String, from_tab_id: String },
     Disconnect { tab_id: String },
 }
 
@@ -50,21 +50,8 @@ impl TabState {
 
     fn remove_tab(&mut self, tab_id: &str) {
         web_sys::console::log_1(&format!("Removing tab: {}", tab_id).into());
-        let was_leader = self.get_leader().map(|id| id == tab_id).unwrap_or(false);
         self.tabs.retain(|id| id != tab_id);
         self.ports.remove(tab_id);
-
-        if was_leader {
-            web_sys::console::log_1(&"Leader disconnected, notifying new leader".into());
-            if let Some(new_leader) = self.get_leader() {
-                if let Some(leader_port) = self.ports.get(new_leader) {
-                    let response = TabMessage::LeaderResponse { is_leader: true };
-                    leader_port
-                        .post_message(&serde_wasm_bindgen::to_value(&response).unwrap())
-                        .unwrap();
-                }
-            }
-        }
     }
 }
 
@@ -92,12 +79,16 @@ pub fn handle_connect(e: MessageEvent) {
 }
 
 fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
+    web_sys::console::log_1(&format!("Worker received message: {:?}", msg).into());
     match msg {
         TabMessage::Register { tab_id } => {
             web_sys::console::log_1(&format!("Handling register for tab: {}", tab_id).into());
             TAB_STATE.with(|state| {
                 let mut state = state.borrow_mut();
                 state.register_tab(tab_id.clone(), port.clone());
+                web_sys::console::log_1(
+                    &format!("After register, ports: {:?}", state.ports.keys()).into(),
+                );
 
                 let is_leader = state.get_leader().map(|id| id == &tab_id).unwrap_or(false);
 
@@ -121,21 +112,52 @@ fn handle_message(msg: TabMessage, port: Rc<web_sys::MessagePort>) {
             });
         }
         TabMessage::QueryLeader { ref from_tab_id } => {
+            web_sys::console::log_1(&format!("Querying leader from tab: {}", from_tab_id).into());
             TAB_STATE.with(|state| {
-                if let Some(leader_id) = state.borrow().get_leader() {
-                    if let Some(leader_port) = state.borrow().ports.get(leader_id) {
-                        leader_port
-                            .post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
-                            .unwrap();
+                let state = state.borrow();
+                web_sys::console::log_1(&format!("Current ports: {:?}", state.ports.keys()).into());
+                if let Some(leader_id) = state.get_leader() {
+                    web_sys::console::log_1(&format!("Found leader: {}", leader_id).into());
+                    web_sys::console::log_1(
+                        &format!(
+                            "Port exists for leader: {}",
+                            state.ports.contains_key(leader_id)
+                        )
+                        .into(),
+                    );
+                    if let Some(leader_port) = state.ports.get(leader_id) {
+                        web_sys::console::log_1(&"Got leader port, forwarding query".into());
+                        let msg_value = serde_wasm_bindgen::to_value(&msg).unwrap();
+                        web_sys::console::log_1(
+                            &format!("Message to forward: {:?}", msg_value).into(),
+                        );
+                        match leader_port.post_message(&msg_value) {
+                            Ok(_) => {
+                                web_sys::console::log_1(&"Successfully forwarded message".into())
+                            }
+                            Err(e) => web_sys::console::log_1(
+                                &format!("Error forwarding message: {:?}", e).into(),
+                            ),
+                        }
+                    } else {
+                        web_sys::console::log_1(&"Leader port not found!".into());
                     }
+                } else {
+                    web_sys::console::log_1(&"No leader found!".into());
                 }
             });
         }
-        TabMessage::LeaderDataResponse { ref data } => {
+        TabMessage::LeaderDataResponse {
+            data: _,
+            ref from_tab_id,
+        } => {
+            web_sys::console::log_1(
+                &format!("Leader data response from tab: {}", from_tab_id).into(),
+            );
             TAB_STATE.with(|state| {
-                // Just send to all tabs for now - the leader will know who to respond to
-                for port in state.borrow().ports.values() {
-                    port.post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
+                if let Some(requester_port) = state.borrow().ports.get(from_tab_id) {
+                    requester_port
+                        .post_message(&serde_wasm_bindgen::to_value(&msg).unwrap())
                         .unwrap();
                 }
             });
