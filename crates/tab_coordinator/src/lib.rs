@@ -1,3 +1,4 @@
+use base64::Engine;
 use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -5,7 +6,22 @@ use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, JsFuture};
-use web_sys::{console, MessagePort, SharedWorker};
+use web_sys::{console, Blob, BlobPropertyBag, MessagePort, SharedWorker, Url};
+
+const TC_SHARED_WORKER_BUNDLE_B64: &str =
+    include_str!("../../../demo/pkg/worker/shared_worker_bundle.js.b64");
+
+fn blob_url_from_js_b64(b64: &str) -> Result<String, JsValue> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let parts = js_sys::Array::new();
+    parts.push(&js_sys::Uint8Array::from(bytes.as_slice()));
+    let mut bag = BlobPropertyBag::new();
+    bag.type_("application/javascript");
+    let blob = Blob::new_with_u8_array_sequence_and_options(&parts, &bag)?;
+    Url::create_object_url_with_blob(&blob)
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
@@ -63,8 +79,9 @@ impl TabManager {
             None::<oneshot::Sender<Result<Vec<Vec<String>>, String>>>,
         ));
 
-        // Create the shared worker
-        let shared_worker = SharedWorker::new("/pkg/worker/tab_coordinator_shared_worker.js")?;
+        // Create the shared worker from embedded bundle
+        let url = blob_url_from_js_b64(TC_SHARED_WORKER_BUNDLE_B64)?;
+        let shared_worker = SharedWorker::new(&url)?;
         let port = shared_worker.port();
         port.start();
 
