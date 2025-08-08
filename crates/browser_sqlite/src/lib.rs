@@ -1,7 +1,63 @@
+use base64::Engine;
 use tab_coordinator::TabManager;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::Worker;
+use web_sys::{Blob, BlobPropertyBag, Request, Response, Url, Worker};
+
+const SQLITE_WORKER_BUNDLE_B64: &str =
+    include_str!("../../../demo/pkg/sqlite_wrapper/worker_bundle.js.b64");
+
+fn blob_url_from_js_b64(b64: &str) -> Result<String, JsValue> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let parts = js_sys::Array::new();
+
+    parts.push(&js_sys::Uint8Array::from(bytes.as_slice()));
+
+    let mut bag = BlobPropertyBag::new();
+    bag.set_type("application/javascript");
+
+    let blob = Blob::new_with_u8_array_sequence_and_options(&parts, &bag)?;
+
+    Url::create_object_url_with_blob(&blob)
+}
+
+// async fn create_sqlite_worker_blob_url(additional_code: Option<&str>) -> Result<String, JsValue> {
+//     // Fetch the SQLite worker JavaScript file
+//     // let window = web_sys::window().ok_or("No window object")?;
+//     // let request = Request::new_with_str("./pkg/sqlite_wrapper/sqlite_wrapper.js")?;
+//     // let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+//     // let resp: Response = resp_value.dyn_into()?;
+//     // let text = JsFuture::from(resp.text()?).await?;
+
+//     let js_content = include_str!("./sqlite_wrapper.js");
+//     let mut content = js_content.to_string();
+
+//     // let mut content = text.as_string().unwrap_or_default();
+
+//     // Append additional content to the worker if provided
+//     if let Some(extra_code) = additional_code {
+//         content.push_str("\n\n// Additional injected code\n");
+//         content.push_str(extra_code);
+//         content.push_str("\n");
+//     }
+
+//     // Create a blob from the modified content
+//     let array = js_sys::Array::new();
+//     array.push(&content.into());
+
+//     let blob_options = BlobPropertyBag::new();
+//     blob_options.set_type("application/javascript");
+
+//     let blob = Blob::new_with_str_sequence_and_options(&array, &blob_options)?;
+
+//     // Create object URL from blob
+//     let url = Url::create_object_url_with_blob(&blob)?;
+
+//     Ok(url)
+// }
 
 #[wasm_bindgen]
 pub struct BrowserSQLite {
@@ -12,15 +68,59 @@ pub struct BrowserSQLite {
 #[wasm_bindgen]
 impl BrowserSQLite {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Result<BrowserSQLite, JsValue> {
-        let worker = Worker::new("./pkg/sqlite_wrapper/sqlite_wrapper.js")?;
-        let tab_manager = TabManager::new(worker.clone())?;
+    pub async fn new() -> Result<BrowserSQLite, JsValue> {
+        // Create blob URL for the SQLite worker
+        let additional_code = r#"
+// Save the real onconnect handler
+let realOnconnect = null;
+
+// Set up onconnect immediately
+self.onconnect = (e) => {
+    console.log("JS onconnect fired");
+    if (realOnconnect) {
+        realOnconnect(e);
+    } else {
+        console.log("WASM not ready yet, connection will be handled after init");
+        // Store the event to handle after WASM init
+        self._pendingConnection = e;
+    }
+};
+
+// Initialize the worker
+wasm_bindgen(self.location.origin + "/pkg/sqlite_wrapper/sqlite_wrapper_bg.wasm").then(async () => {
+    try {
+        await wasm_bindgen.main();
+        console.log("SQLite worker initialized");
+        
+        // Store the real handler
+        realOnconnect = wasm_bindgen.handle_connect;
+        
+        // Handle any pending connection
+        if (self._pendingConnection) {
+            console.log("Handling pending connection");
+            realOnconnect(self._pendingConnection);
+            self._pendingConnection = null;
+        }
+    } catch (err) {
+        console.error("Failed to initialize SQLite worker:", err);
+    }
+}).catch(err => {
+    console.error("Failed to load WASM:", err);
+}); 
+"#;
+        // let blob_url = create_sqlite_worker_blob_url(Some(additional_code)).await?;
+        // web_sys::console::log_1(&format!("Created SQLite worker blob URL: {}", blob_url).into());
+
+        let url = blob_url_from_js_b64(SQLITE_WORKER_BUNDLE_B64)?;
+        let worker = Worker::new(&url)?;
+        let tab_manager = TabManager::new(worker.clone()).await?;
         Ok(BrowserSQLite {
             worker,
             tab_manager,
         })
     }
 
+    #[wasm_bindgen]
     pub async fn execute(&self, sql: &str) -> Result<(), JsValue> {
         // Check if we're the leader first
         let is_leader = self.tab_manager.check_leader().await?;
@@ -45,6 +145,7 @@ impl BrowserSQLite {
         Ok(())
     }
 
+    #[wasm_bindgen]
     pub async fn query(&self, sql: &str) -> Result<JsValue, JsValue> {
         let is_leader = self.tab_manager.check_leader().await?;
         web_sys::console::log_1(&JsValue::from_str(&format!(
@@ -73,10 +174,12 @@ impl BrowserSQLite {
         }
     }
 
+    #[wasm_bindgen]
     pub fn get_tab_id(&self) -> String {
         self.tab_manager.get_tab_id()
     }
 
+    #[wasm_bindgen]
     pub async fn check_leader(&self) -> Result<bool, JsValue> {
         self.tab_manager.check_leader().await
     }

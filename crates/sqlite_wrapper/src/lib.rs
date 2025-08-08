@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::ffi::CString;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::{self, JsFuture};
+use wasm_bindgen_futures::{self};
 use web_sys::DedicatedWorkerGlobalScope;
 
 #[wasm_bindgen]

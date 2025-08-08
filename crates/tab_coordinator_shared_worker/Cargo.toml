@@ -13,7 +13,13 @@ serde-wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = [
     "MessagePort",
     "MessageEvent",
-    "console"
+    "console",
+    "Response",
+    "Request",
+    "RequestInit",
+    "WorkerGlobalScope",
+    "Window"
 ]}
+wasm-bindgen-futures = { workspace = true }
 js-sys = { workspace = true }
 uuid = { workspace = true } 

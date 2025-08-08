@@ -12,7 +12,13 @@ web-sys = { workspace = true, features = [
     "MessagePort",
     "SharedWorker",
     "MessageEvent",
-    "console"
+    "console",
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "Request",
+    "Response",
+    "Window"
 ]}
 js-sys = { workspace = true }
 serde = { workspace = true }
@@ -20,3 +26,4 @@ serde-wasm-bindgen = { workspace = true }
 uuid = { workspace = true }
 futures = "0.3"
 wasm-bindgen-futures = "0.4" 
+base64 = "0.22"

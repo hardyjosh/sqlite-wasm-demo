@@ -117,8 +117,8 @@
 
         async function run() {
             await init();
-            const db = new BrowserSQLite();
-            
+            const db = await (new BrowserSQLite());
+
             // Display tab ID
             document.getElementById('tab-id').textContent = db.get_tab_id();
             
@@ -165,7 +165,12 @@
 
             // Poll leader status
             async function updateLeaderStatus() {
-                const isLeader = await db.check_leader();
+                console.log("Checking leader status...");
+                const isLeader = await db.check_leader().catch(e => {
+                    console.log('SHSHDHSDs')
+                    console.log(e);
+                });
+                console.log("Leader status:", isLeader);
                 const badge = document.getElementById('leader-status');
                 badge.textContent = isLeader ? 'Leader' : 'Not Leader';
                 badge.className = `leader-badge ${isLeader ? 'is-leader' : 'not-leader'}`;

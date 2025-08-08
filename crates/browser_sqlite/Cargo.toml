@@ -19,7 +19,13 @@ web-sys = { workspace = true, features = [
     "HtmlElement",
     "console",
     "Worker",
-    "MessageEvent"
+    "MessageEvent",
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "Request",
+    "Response"
 ]}
 js-sys = { workspace = true }
 sqlite_wrapper = { path = "../sqlite_wrapper" } 
+base64 = "0.22"
